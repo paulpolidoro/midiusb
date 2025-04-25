@@ -15,9 +15,9 @@ if(WIN32)
 else()
     set(USERHOME $ENV{HOME})
 endif()
-set(sdkVersion 2.1.1)
-set(toolchainVersion 14_2_Rel1)
-set(picotoolVersion 2.1.1)
+set(sdkVersion 2.0.0)
+set(toolchainVersion 13_2_Rel1)
+set(picotoolVersion 2.0.0)
 set(picoVscode ${USERHOME}/.pico-sdk/cmake/pico-vscode.cmake)
 if (EXISTS ${picoVscode})
     include(${picoVscode})
@@ -48,6 +48,7 @@ add_executable(midiusb
     lib/pico-ssd1306/ssd1306.c
     src/foot_controller.c
     src/led_controller.c
+    src/tap_controller.c
 )
 
 pico_set_program_name(midiusb "midiusb")

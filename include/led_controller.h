@@ -1,26 +1,29 @@
 #ifndef LED_CONTROLLER_H
 #define LED_CONTROLLER_H
 
-#include "pico/stdlib.h"
+#include <stdio.h>
+#include <stdint.h>
+#include "hardware/gpio.h"
+#include "pico/time.h"
 
-// Definições dos pinos dos LEDs
-#define LEDPOWER_PIN 2
-#define LEDTAP_PIN 3
-#define LED1_PIN 4
-#define LED2_PIN 5
-#define LED3_PIN 6
-#define LED4_PIN 7
+// Define os pinos dos LEDs
+#define LEDPOWER_PIN 15
+#define LEDTAP_PIN 14
+#define LED1_PIN 13
+#define LED2_PIN 12
+#define LED3_PIN 11
+#define LED4_PIN 10
 
-// Inicializa todos os LEDs
+// Inicializa os LEDs
 void init_leds(void);
 
-// Liga o LED
-void on(uint pin);
+// Liga o LED correspondente ao pino
+void led_on(uint pin);
 
-// Desliga o LED
-void off(uint pin);
+// Desliga o LED correspondente ao pino
+void led_off(uint pin);
 
-// Pisca o LED com um intervalo de tempo especificado
-void blink(uint pin, uint interval_ms);
+// Pisca o LED de forma contínua e independente
+void led_blink(uint pin, uint interval_ms);
 
 #endif // LED_CONTROLLER_H

@@ -1,13 +1,25 @@
 #include <stdio.h>
 #include "pico/stdlib.h"
 #include "pico/binary_info.h"
+#include "hardware/uart.h"
 #include "bsp/board_api.h"
 #include "tusb.h"
 #include "usb_midi_host.h"
+#include "foot_controller.h"
+#include "tap_controller.h"
+#include "led_controller.h"
+
+#define UART_ID uart0
+#define BAUD_RATE 115200
+#define UART_TX_PIN 0
+#define UART_RX_PIN 1
+
 #ifdef RASPBERRYPI_PICO_W
 // The Board LED is controlled by the CYW43 WiFi/Bluetooth module
 #include "pico/cyw43_arch.h"
 #endif
+
+TapTempo tempo;
 
 static uint8_t midi_dev_addr = 0;
 
@@ -80,15 +92,70 @@ void send_cc(uint8_t dev_addr, uint8_t cable_num, uint8_t channel, uint8_t cc_nu
     tuh_midi_stream_flush(dev_addr);
 }
 
+int bpm_to_ms(int bpm) {
+  if (bpm <= 0) {
+      return 0; // Retorna -1 para valores de BPM inválidos
+  }
+  return 60000 / bpm; // Converte BPM para milissegundos
+}
+
+void custom_button_pressed(uint8_t pin) {
+  uint16_t ultimo_bpm = get_bpm(&tempo); 
+
+  tap(&tempo);
+
+  if(ultimo_bpm != get_bpm(&tempo)) {
+    if(get_bpm(&tempo)  >= MIN_BPM){
+      led_blink(LEDTAP_PIN, bpm_to_ms(get_bpm(&tempo)) / 2); // Pisca o LED de tap tempo
+    }
+  } 
+}
+
+void custom_button_released(uint8_t pin) {
+}
+
+void custom_button_short_press(uint8_t pin) {
+}
+
+void custom_button_long_press(uint8_t pin) {
+  led_off(LEDTAP_PIN); 
+}
+
 
 int main() {
+  uart_init(UART_ID, BAUD_RATE);
 
-    bi_decl(bi_program_description("A USB MIDI host example."));
+  // Configura os pinos TX e RX
+  gpio_set_function(UART_TX_PIN, GPIO_FUNC_UART);
+  gpio_set_function(UART_RX_PIN, GPIO_FUNC_UART);
 
-    board_init();
+  // Configura o formato da UART (8 bits de dados, sem paridade, 1 bit de parada)
+  uart_set_format(UART_ID, 8, 1, UART_PARITY_NONE);
 
-    printf("Pico MIDI Host Example\r\n");
-    tusb_init();
+  // Habilita a UART
+  uart_set_fifo_enabled(UART_ID, true);
+
+  bi_decl(bi_program_description("A USB MIDI host example."));
+
+  board_init();
+
+  // Sobrescreve os callbacks padrão
+  on_button_pressed = custom_button_pressed;
+  on_button_released = custom_button_released;
+  on_button_short_press = custom_button_short_press;
+  on_button_long_press = custom_button_long_press;
+
+  init_buttons();
+
+  init_tap_tempo(&tempo);
+
+  init_leds();
+
+  led_on(LEDPOWER_PIN); // Liga o LED de power
+
+  uart_puts(UART_ID, "MIDI Conntroller\r\n");
+  tusb_init();
+
 #ifdef RASPBERRYPI_PICO_W
     // for the LED blink
     if (cyw43_arch_init()) {
@@ -99,7 +166,7 @@ int main() {
     while (1) {
         tuh_task();
 
-        blink_led();
+        // blink_led();
         bool connected = midi_dev_addr != 0 && tuh_midi_configured(midi_dev_addr);
 
         // device must be attached and have at least one endpoint ready to receive a message
@@ -122,28 +189,37 @@ int main() {
 // therefore report_desc = NULL, desc_len = 0
 void tuh_midi_mount_cb(uint8_t dev_addr, uint8_t in_ep, uint8_t out_ep, uint8_t num_cables_rx, uint16_t num_cables_tx)
 {
-  printf("MIDI device address = %u, IN endpoint %u has %u cables, OUT endpoint %u has %u cables\r\n",
+  char buffer[64];
+  snprintf(buffer, sizeof(buffer), "MIDI device address = %d, IN endpoint %d has %d cables, OUT endpoint %d has %d cables\r\n",
       dev_addr, in_ep & 0xf, num_cables_rx, out_ep & 0xf, num_cables_tx);
+  uart_puts(UART_ID, buffer);
+
 
   if (midi_dev_addr == 0) {
     // then no MIDI device is currently connected
     midi_dev_addr = dev_addr;
   }
   else {
-    printf("A different USB MIDI Device is already connected.\r\nOnly one device at a time is supported in this program\r\nDevice is disabled\r\n");
+
+    uart_puts(UART_ID, "A different USB MIDI Device is already connected.\r\nOnly one device at a time is supported in this program\r\nDevice is disabled\r\n");
   }
 }
 
 // Invoked when device with hid interface is un-mounted
 void tuh_midi_umount_cb(uint8_t dev_addr, uint8_t instance)
 {
+  char buffer[64];
+
   if (dev_addr == midi_dev_addr) {
     midi_dev_addr = 0;
-    printf("MIDI device address = %d, instance = %d is unmounted\r\n", dev_addr, instance);
+
+    snprintf(buffer, sizeof(buffer), "MIDI device address = %d, instance = %d is unmounted\r\n", dev_addr, instance);
   }
   else {
-    printf("Unused MIDI device address = %d, instance = %d is unmounted\r\n", dev_addr, instance);
+    snprintf(buffer, sizeof(buffer), "MIDI device address = %d, instance = %d is unmounted\r\n", dev_addr, instance);
   }
+
+  uart_puts(UART_ID, buffer);
 }
 
 void tuh_midi_rx_cb(uint8_t dev_addr, uint32_t num_packets)
@@ -152,15 +228,19 @@ void tuh_midi_rx_cb(uint8_t dev_addr, uint32_t num_packets)
     if (num_packets != 0) {
       uint8_t cable_num;
       uint8_t buffer[48];
+      char buffertxt[64];
       while (1) {
         uint32_t bytes_read = tuh_midi_stream_read(dev_addr, &cable_num, buffer, sizeof(buffer));
         if (bytes_read == 0)
           return;
-        printf("MIDI RX Cable #%u:", cable_num);
+          
+          snprintf(buffertxt, sizeof(buffertxt), "MIDI RX Cable #%u:", cable_num);
+          uart_puts(UART_ID, buffertxt);
         for (uint32_t idx = 0; idx < bytes_read; idx++) {
-          printf("%02x ", buffer[idx]);
+          snprintf(buffertxt, sizeof(buffertxt), "%02x ", buffer[idx]);
+          uart_puts(UART_ID, buffertxt);
         }
-        printf("\r\n");
+        uart_puts(UART_ID, "\r\n");
       }
     }
   }
