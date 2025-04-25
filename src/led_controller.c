@@ -1,17 +1,9 @@
 #include "led_controller.h"
 #include "pico/time.h"
-#include "hardware/timer.h"
+#include "hardware/gpio.h"
+#include <stdio.h>
 
-// Estrutura para gerenciar o estado de cada LED
-typedef struct {
-    uint pin;                     // Pino associado ao LED
-    bool is_blinking;             // Indica se o LED está piscando
-    repeating_timer_t timer;      // Temporizador para alternar o estado
-    uint interval_ms;             // Intervalo atual em ms
-    bool led_state;               // Estado atual do LED (on/off)
-} LEDState;
 
-// Variáveis para gerenciar os estados dos LEDs
 LEDState led_states[] = {
     {LEDPOWER_PIN, false, {}, 500, false},
     {LEDTAP_PIN, false, {}, 500, false},
@@ -21,78 +13,142 @@ LEDState led_states[] = {
     {LED4_PIN, false, {}, 500, false}
 };
 
-// Inicializa os LEDs configurando os pinos correspondentes
-void init_leds(void) {
-    for (int i = 0; i < sizeof(led_states) / sizeof(LEDState); i++) {
+
+/**
+ * Inicia os LEDS
+ */
+void init_leds() {
+    for (uint i = 0; i < sizeof(led_states) / sizeof(LEDState); i++) {
         gpio_init(led_states[i].pin);
         gpio_set_dir(led_states[i].pin, GPIO_OUT);
-        gpio_put(led_states[i].pin, 0); // Certifica-se de que os LEDs começam desligados
+        gpio_put(led_states[i].pin, 0);
     }
 }
 
-// Liga o LED correspondente ao pino e para o piscar
-void led_on(uint pin) {
-    for (int i = 0; i < sizeof(led_states) / sizeof(LEDState); i++) {
+/**
+ * Procura o LED pelo PIN recebido
+ * @param pin
+ * @return
+ */
+LEDState *find_led(const int pin) {
+    for (uint i = 0; i < sizeof(led_states) / sizeof(LEDState); i++) {
         if (led_states[i].pin == pin) {
-            led_states[i].is_blinking = false; // Para o piscar
-            cancel_repeating_timer(&led_states[i].timer); // Cancela o temporizador
-            gpio_put(pin, 1);                 // Liga o LED
-            led_states[i].led_state = true;   // Atualiza o estado do LED
-            break;
+            return &led_states[i];
+        }
+    }
+
+    return NULL;
+}
+
+/**
+ * Liga o LED, interrompe o blink se estiver ativo
+ * @param pin
+ */
+void led_on(const int pin) {
+    LEDState *led = find_led(pin);
+
+    if (led != NULL) {
+        printf("LED %d ON\r\n", pin);
+
+        led->is_blinking = false;
+        cancel_repeating_timer(&led->timer);
+        gpio_put(pin, 1);
+        led->led_state = true;
+    }
+}
+
+/**
+ * Desliga o LED, interrompe o blink se estiver ativo
+ * @param pin
+ */
+void led_off(const int pin) {
+    LEDState *led = find_led(pin);
+
+    if (led != NULL) {
+        printf("LED %d OFF\r\n", pin);
+
+        led->is_blinking = false;
+        cancel_repeating_timer(&led->timer);
+        gpio_put(pin, 0);
+        led->led_state = false;
+    }
+}
+
+/**
+ * Liga ou desliga o LED de acordo com o status atual
+ * @param pin
+ */
+void led_toggle(const int pin) {
+    const LEDState *led = find_led(pin);
+
+    if (led != NULL) {
+        printf("LED %d TOGGLE\r\n", pin);
+
+        if (led->is_blinking || led->led_state) {
+            led_off(pin);
+        } else {
+            led_on(pin);
         }
     }
 }
 
-// Desliga o LED correspondente ao pino e para o piscar
-void led_off(uint pin) {
-    for (int i = 0; i < sizeof(led_states) / sizeof(LEDState); i++) {
-        if (led_states[i].pin == pin) {
-            led_states[i].is_blinking = false; // Para o piscar
-            cancel_repeating_timer(&led_states[i].timer); // Cancela o temporizador
-            gpio_put(pin, 0);                 // Desliga o LED
-            led_states[i].led_state = false;  // Atualiza o estado do LED
-            break;
-        }
-    }
-}
-
-// Callback usado pelo temporizador para alternar o estado do LED
-bool blink_callback(repeating_timer_t *rt) {
-    LEDState *led = (LEDState *)rt->user_data;
+/**
+ * Callback apra executar as alterações de blink do LED
+ * @param rt
+ * @return
+ */
+_Bool blink_callback(const repeating_timer_t *rt) {
+    LEDState *led = rt->user_data;
 
     if (led->is_blinking) {
         // Alterna o estado do LED
-        led->led_state = !(led->led_state);
+        led->led_state = !led->led_state;
         gpio_put(led->pin, led->led_state);
-        return true; // Continua repetindo o temporizador
+
+        // Se há timeout configurado, atualiza o tempo decorrido
+        if (led->timeout_ms > 0) {
+            led->elapsed_ms += led->interval_ms;
+
+            if (led->elapsed_ms >= led->timeout_ms) {
+                // Cancela o blinking
+                led->is_blinking = false;
+                gpio_put(led->pin, false);  // Garante que o LED apague
+                return false;              // Cancela o timer
+            }
+        }
+
+        return true; // Continua o blinking
     }
 
-    return false; // Para o temporizador
+    return false; // Cancela o timer se não estiver piscando
 }
 
-// Função de piscar para cada LED (atualiza velocidade se já estiver piscando)
-void led_blink(uint pin, uint interval_ms) {
-    for (int i = 0; i < sizeof(led_states) / sizeof(LEDState); i++) {
+/**
+ * Inicia o blink ou altera a velocidade caso já esteja iniciado
+ * @param pin
+ * @param interval_ms
+ * @param timeout_ms
+ */
+void led_blink(const int pin, const int interval_ms, const int timeout_ms) {
+    printf("LED %d BLINK \r\n", pin);
+    for (uint i = 0; i < sizeof(led_states) / sizeof(LEDState); i++) {
         if (led_states[i].pin == pin) {
-            // Se já estiver piscando, atualiza o intervalo
+            // Cancela o timer existente, se necessário
             if (led_states[i].is_blinking) {
-                // Cancela o temporizador atual de forma segura
-                if (cancel_repeating_timer(&led_states[i].timer)) {
-                    printf("Temporizador cancelado com sucesso para o pino %d\n", pin);
-                } else {
-                    printf("Erro ao cancelar temporizador para o pino %d\n", pin);
+                if (led_states[i].interval_ms == interval_ms && led_states[i].timeout_ms == timeout_ms) {
+                    return; // Já está piscando com os mesmos parâmetros
                 }
+                cancel_repeating_timer(&led_states[i].timer);
             }
 
-            // Atualiza o estado e recria o temporizador
+            // Configura os novos valores
             led_states[i].is_blinking = true;
-            led_states[i].interval_ms = interval_ms; // Atualiza o intervalo
-            if (add_repeating_timer_ms(interval_ms, blink_callback, &led_states[i], &led_states[i].timer)) {
-                printf("Novo temporizador criado para o pino %d com intervalo de %d ms\n", pin, interval_ms);
-            } else {
-                printf("Falha ao criar temporizador para o pino %d\n", pin);
-            }
+            led_states[i].interval_ms = interval_ms;
+            led_states[i].timeout_ms = timeout_ms;
+            led_states[i].elapsed_ms = 0;
 
+            // Inicia o blinking
+            add_repeating_timer_ms(interval_ms, blink_callback, &led_states[i], &led_states[i].timer);
             break;
         }
     }
