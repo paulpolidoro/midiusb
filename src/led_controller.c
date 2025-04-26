@@ -112,7 +112,7 @@ _Bool blink_callback(const repeating_timer_t *rt) {
             if (led->elapsed_ms >= led->timeout_ms) {
                 // Cancela o blinking
                 led->is_blinking = false;
-                gpio_put(led->pin, false);  // Garante que o LED apague
+                gpio_put(led->pin, led->before_blink);  // Garante que o LED apague
                 return false;              // Cancela o timer
             }
         }
@@ -146,6 +146,7 @@ void led_blink(const int pin, const int interval_ms, const int timeout_ms) {
             led_states[i].interval_ms = interval_ms;
             led_states[i].timeout_ms = timeout_ms;
             led_states[i].elapsed_ms = 0;
+            led_states[i].before_blink = led_states[i].led_state;
 
             // Inicia o blinking
             add_repeating_timer_ms(interval_ms, blink_callback, &led_states[i], &led_states[i].timer);

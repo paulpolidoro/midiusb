@@ -19,7 +19,8 @@ typedef struct {
     int interval_ms;           // Intervalo de piscar (em ms)
     bool led_state;            // Estado atual do LED (ligado/desligado)
     int timeout_ms;            // Tempo limite para o blinking (em ms)
-    int elapsed_ms;            // Tempo já decorrido (em ms)
+    int elapsed_ms;
+    bool before_blink;// Tempo já decorrido (em ms)
 } LEDState;
 
 

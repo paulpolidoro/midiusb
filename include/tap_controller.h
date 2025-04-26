@@ -32,4 +32,12 @@ void init_tap_tempo(TapTempo *tempo);
  */
 void tap(TapTempo *tempo);
 
+/**
+ *
+ * @param tempo
+ * @param bpm
+ */
+void set_tempo(TapTempo *tempo, int bpm);
+
+
 #endif

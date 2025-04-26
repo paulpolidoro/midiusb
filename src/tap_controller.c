@@ -1,12 +1,17 @@
-#include "tap_controller.h"
 #include <stdio.h>
+#include "tap_controller.h"
+#include "led_controller.h"
 
 /**
  *
  * @param tempo
  * @param bpm
  */
-void update_tempo(TapTempo *tempo, uint16_t bpm) {
+void set_tempo(TapTempo *tempo, int bpm) {
+    if (bpm < 0) {
+        return;
+    }
+
     if (bpm < MIN_BPM) {
         bpm = MIN_BPM;
     } else if (bpm > MAX_BPM) {
@@ -18,6 +23,8 @@ void update_tempo(TapTempo *tempo, uint16_t bpm) {
 
     tempo->bpm = bpm;
     tempo->ms = 60000 / bpm;
+
+    led_blink(LEDTAP_PIN, tempo->ms / 2, 0);
 
     printf("BPM: %d \r\n", tempo->bpm);
 }
@@ -35,7 +42,7 @@ void tap(TapTempo *tempo) {
         if (bpm < RESET_BPM_THRESHOLD) {
             tempo->valid_tap = true;
         } else {
-            update_tempo(tempo, bpm);
+            set_tempo(tempo, bpm);
         }
     } else {
         tempo->valid_tap = true;
@@ -51,8 +58,8 @@ void tap(TapTempo *tempo) {
 void init_tap_tempo(TapTempo *tempo) {
     tempo->last_tap_time = nil_time;
     tempo->previous_bpm = 0;
-    tempo->bpm = 0;
+    tempo->bpm = 60;
     tempo->previous_ms = 0;
-    tempo->ms = 0;
+    tempo->ms = 1000;
     tempo->valid_tap = false;
 }
