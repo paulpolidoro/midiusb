@@ -51,6 +51,7 @@ add_executable(
         src/led_controller.c
         src/tap_controller.c
         src/mp100_controller.c
+        src/midi_controller.c
 )
 
 pico_set_program_name(midiusb "midiusb")

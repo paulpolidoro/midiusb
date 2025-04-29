@@ -9,20 +9,21 @@
 #include "tap_controller.h"
 #include "led_controller.h"
 #include "mp100_controller.h"
+#include "midi_controller.h"
 
 #define UART_ID uart0
 #define BAUD_RATE 115200
 #define UART_TX_PIN 0
 #define UART_RX_PIN 1
-#define MAX_SYSEX_SIZE 256
+
 
 uint8_t sysex_data[MAX_SYSEX_SIZE];
 uint32_t sysex_index = 0;
 TapTempo tempo;
 int global_tempo = false;
+bool connected = false;
 
 static uint8_t midi_dev_addr = 0;
-
 
 
 void send_cc(const uint8_t dev_addr, const uint8_t cable_num, const uint8_t channel, const uint8_t cc_number, const uint8_t cc_value) {
@@ -42,13 +43,13 @@ void send_cc(const uint8_t dev_addr, const uint8_t cable_num, const uint8_t chan
 void send_tempo() {
     const int* bpm_cc = mp100_bpm_to_cc(tempo.bpm);
 
-    send_cc(midi_dev_addr, 0, 1, 73, bpm_cc[0]);
-    send_cc(midi_dev_addr, 0, 1, 74, bpm_cc[1]);
+    usb_send_cc(midi_dev_addr, 0, 1, 73, bpm_cc[0]);
+    usb_send_cc(midi_dev_addr, 0, 1, 74, bpm_cc[1]);
 }
 
 void patch_change(const int cc, const int pin) {
     led_blink(pin, 100, 500);
-    send_cc(midi_dev_addr, 0, 1, cc, 127);
+    usb_send_cc(midi_dev_addr, 0, 1, cc, 127);
     if (global_tempo) {
         send_tempo();
     }
@@ -90,7 +91,7 @@ void foot_short_press(const uint8_t pin) {
             break;
         case FOOT4_PIN:
             printf("CONTROL \r\n");
-            send_cc(midi_dev_addr, 0, 1, 72, 127);
+            usb_send_cc(midi_dev_addr, 0, 1, 72, 127);
             led_toggle(LED4_PIN);
         default:
             break;
@@ -147,14 +148,7 @@ int main() {
     while (1) {
         tuh_task();
 
-        bool const connected = midi_dev_addr != 0 && tuh_midi_configured(midi_dev_addr);
-
-        // device must be attached and have at least one endpoint ready to receive a message
-        //if (connected && tuh_midih_get_num_tx_cables(midi_dev_addr) >= 1) {
-            //send_next_note();
-            // transmit any previously queued bytes (do this once per main loop)
-            //tuh_midi_stream_flush(midi_dev_addr);
-        //}
+        connected = midi_dev_addr != 0 && tuh_midi_configured(midi_dev_addr);
     }
 }
 
@@ -194,26 +188,25 @@ void tuh_midi_rx_cb(const uint8_t dev_addr, const uint32_t num_packets) {
             for (uint32_t idx = 0; idx < bytes_read; idx++) {
                 const uint8_t byte = buffer[idx];
 
-                if (byte == 0xF0) { // Início de SysEx
-                    sysex_index = 0; // Reinicia o índice
+                if (byte == MIDI_SYSEX_START) {
+                    sysex_index = 0;
                     continue;
                 }
 
-                if (byte == 0xF7) { // Fim de SysEx
-                    if (sysex_index > 0) { // Processa o SysEx se houver dados
+                if (byte == MIDI_SYSEX_END) {
+                    if (sysex_index > 0) {
                         set_tempo(&tempo, mp100_sysex_tempo(sysex_data, sysex_index));
                         mp100_sysex_patch(sysex_data, sysex_index);
 
-                        sysex_index = 0; // Reinicia para o próximo SysEx
+                        sysex_index = 0;
                     }
                     continue;
                 }
 
-                // Adiciona o byte ao array, se houver espaço
                 if (sysex_index < MAX_SYSEX_SIZE) {
                     sysex_data[sysex_index++] = byte;
                 } else {
-                    printf("Erro: SysEx excedeu o tamanho máximo!\n");
+                    printf("Erro: SysEx excedeu o tamanho máximo!\r\n");
                 }
             }
         }
